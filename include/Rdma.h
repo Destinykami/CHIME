@@ -18,7 +18,7 @@
 #define DCT_ACCESS_KEY 3185
 #define UD_PKEY 0x11111111
 #define PSN 3185
-#define NET_DEV_NAME "enp202s0f0" // [CONFIG] enp202s0f0   (check from ifconfig)
+#define NET_DEV_NAME "enp160s0f0np0" // [CONFIG] enp202s0f0   (check from ifconfig)
 #define IB_DEV_NAME_IDX '2'       // [CONFIG] 2            (check from ibdev2netdev)
 #define MLX_PORT 1                // [CONFIG] 1            (check from ibdev2netdev)
 #define MLX_GID 1                 // [CONFIG] 1            (check from show_gids)
@@ -79,7 +79,7 @@ bool createQueuePair(ibv_qp **qp, ibv_qp_type mode, ibv_cq *send_cq,
                      ibv_cq *recv_cq, RdmaContext *context,
                      uint32_t qpsMaxDepth = kQPMaxDepth, uint32_t maxInlineData = kInlineDataMax);
 
-bool createDCTarget(ibv_exp_dct **dct, ibv_cq *cq, RdmaContext *context,
+bool createDCTarget(ibv_qp **dct, ibv_cq *cq, RdmaContext *context,
                     uint32_t qpsMaxDepth = kQPMaxDepth, uint32_t maxInlineData = kInlineDataMax);
 void fillAhAttr(ibv_ah_attr *attr, uint32_t remoteLid, uint8_t *remoteGid,
                 RdmaContext *context);

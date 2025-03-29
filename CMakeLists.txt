@@ -8,7 +8,8 @@ set(CMAKE_CXX_FLAGS "${CMAKE_C_FLAGS} -std=c++17")
 
 #Link Options
 set(LINKS_FLAGS "-lnuma -lcityhash -lboost_coroutine -lboost_context -lpthread -libverbs -lmemcached -ltbb")
-
+# for clangd
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 #Env Options
 option (STATIC_MN_IP "Use static MNs according the IPs of the nodes" OFF)
 option (ENABLE_CORO "Turn on the coroutine" ON)

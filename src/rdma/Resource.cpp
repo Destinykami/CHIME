@@ -141,28 +141,22 @@ ibv_mr *createMemoryRegion(uint64_t mm, uint64_t mmSize, RdmaContext *ctx) {
 ibv_mr *createMemoryRegionOnChip(uint64_t mm, uint64_t mmSize,
                                  RdmaContext *ctx) {
 
-  /* Device memory allocation request */
-  struct ibv_exp_alloc_dm_attr dm_attr;
+  // /* Device memory allocation request */
+  struct ibv_alloc_dm_attr dm_attr;
   memset(&dm_attr, 0, sizeof(dm_attr));
   dm_attr.length = mmSize;
-  struct ibv_exp_dm *dm = ibv_exp_alloc_dm(ctx->ctx, &dm_attr);
+  struct ibv_dm *dm = ibv_alloc_dm(ctx->ctx, &dm_attr);
   if (!dm) {
     Debug::notifyError("Allocate on-chip memory failed");
+    exit(-1);
     return nullptr;
   }
-
-  /* Device memory registration as memory region */
-  struct ibv_exp_reg_mr_in mr_in;
-  memset(&mr_in, 0, sizeof(mr_in));
-  mr_in.pd = ctx->pd, mr_in.addr = (void *)mm, mr_in.length = mmSize,
-  mr_in.exp_access = IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_READ |
-                     IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_REMOTE_ATOMIC,
-  mr_in.create_flags = 0;
-  mr_in.dm = dm;
-  mr_in.comp_mask = IBV_EXP_REG_MR_DM;
-  struct ibv_mr *mr = ibv_exp_reg_mr(&mr_in);
+  struct ibv_mr *mr = ibv_reg_dm_mr(ctx->pd, dm, 0, mmSize, 
+              IBV_ACCESS_ZERO_BASED|IBV_ACCESS_LOCAL_WRITE | 
+              IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_WRITE | 
+              IBV_ACCESS_REMOTE_ATOMIC);
   if (!mr) {
-    Debug::notifyError("Memory registration failed");
+    Debug::notifyError("Memory registration on chip failed");
     return nullptr;
   }
 
@@ -170,14 +164,8 @@ ibv_mr *createMemoryRegionOnChip(uint64_t mm, uint64_t mmSize,
   char *buffer = (char *)malloc(mmSize);
   memset(buffer, 0, mmSize);
 
-  struct ibv_exp_memcpy_dm_attr cpy_attr;
-  memset(&cpy_attr, 0, sizeof(cpy_attr));
-  cpy_attr.memcpy_dir = IBV_EXP_DM_CPY_TO_DEVICE;
-  cpy_attr.host_addr = (void *)buffer;
-  cpy_attr.length = mmSize;
-  cpy_attr.dm_offset = 0;
-  ibv_exp_memcpy_dm(dm, &cpy_attr);
-
+  dm->memcpy_to_dm(dm, 0, (void *)buffer, mmSize);
+  
   free(buffer);
 
   return mr;
@@ -187,22 +175,14 @@ bool createQueuePair(ibv_qp **qp, ibv_qp_type mode, ibv_cq *send_cq,
                      ibv_cq *recv_cq, RdmaContext *context,
                      uint32_t qpsMaxDepth, uint32_t maxInlineData) {
 
-  struct ibv_exp_qp_init_attr attr;
+  struct ibv_qp_init_attr attr;
   memset(&attr, 0, sizeof(attr));
 
   attr.qp_type = mode;
   attr.sq_sig_all = 0;
   attr.send_cq = send_cq;
   attr.recv_cq = recv_cq;
-  attr.pd = context->pd;
-
-  if (mode == IBV_QPT_RC) {
-    attr.comp_mask = IBV_EXP_QP_INIT_ATTR_CREATE_FLAGS |
-                     IBV_EXP_QP_INIT_ATTR_PD | IBV_EXP_QP_INIT_ATTR_ATOMICS_ARG;
-    attr.max_atomic_arg = MAX_ATOMIC_ARG;
-  } else {
-    attr.comp_mask = IBV_EXP_QP_INIT_ATTR_PD;
-  }
+  //attr.pd = context->pd;
 
   attr.cap.max_send_wr = qpsMaxDepth;
   attr.cap.max_recv_wr = qpsMaxDepth;
@@ -210,13 +190,11 @@ bool createQueuePair(ibv_qp **qp, ibv_qp_type mode, ibv_cq *send_cq,
   attr.cap.max_recv_sge = 1;
   attr.cap.max_inline_data = maxInlineData;
 
-  *qp = ibv_exp_create_qp(context->ctx, &attr);
+  *qp = ibv_create_qp(context->pd, &attr);
   if (!(*qp)) {
     Debug::notifyError("Failed to create QP");
     return false;
   }
-
-  // Debug::notifyInfo("Create Queue Pair with Num = %d", (*qp)->qp_num);
 
   return true;
 }
@@ -227,41 +205,11 @@ bool createQueuePair(ibv_qp **qp, ibv_qp_type mode, ibv_cq *cq,
   return createQueuePair(qp, mode, cq, cq, context, qpsMaxDepth, maxInlineData);
 }
 
-bool createDCTarget(ibv_exp_dct **dct, ibv_cq *cq, RdmaContext *context,
+bool createDCTarget(ibv_qp **dct, ibv_cq *cq, RdmaContext *context,
                     uint32_t qpsMaxDepth, uint32_t maxInlineData) {
-
-  // construct SRQ fot DC Target :)
-  struct ibv_srq_init_attr attr;
-  memset(&attr, 0, sizeof(attr));
-  attr.attr.max_wr = qpsMaxDepth;
-  attr.attr.max_sge = 1;
-  ibv_srq *srq = ibv_create_srq(context->pd, &attr);
-
-  ibv_exp_dct_init_attr dAttr;
-  memset(&dAttr, 0, sizeof(dAttr));
-  dAttr.pd = context->pd;
-  dAttr.cq = cq;
-  dAttr.srq = srq;
-  dAttr.dc_key = DCT_ACCESS_KEY;
-  dAttr.port = context->port;
-  dAttr.access_flags = IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_READ |
-                       IBV_ACCESS_REMOTE_ATOMIC;
-  dAttr.min_rnr_timer = 2;
-  dAttr.tclass = 0;
-  dAttr.flow_label = 0;
-  dAttr.mtu = IBV_MTU;
-  dAttr.pkey_index = 0;
-  dAttr.hop_limit = 1;
-  dAttr.create_flags = 0;
-  dAttr.inline_size = maxInlineData;
-
-  *dct = ibv_exp_create_dct(context->ctx, &dAttr);
-  if (dct == NULL) {
-    Debug::notifyError("failed to create dc target");
-    return false;
-  }
-
-  return true;
+  // 标准RDMA不支持DC目标，因此此功能可能需要重新设计
+  Debug::notifyError("Standard RDMA does not support DC target creation");
+  return false;
 }
 
 void fillAhAttr(ibv_ah_attr *attr, uint32_t remoteLid, uint8_t *remoteGid,
